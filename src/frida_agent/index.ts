@@ -83,6 +83,151 @@ rpc.exports = {
           };
         });
       });
+    } else if (ObjC.available) {
+
+      enum NSSearchPaths {
+          NSApplicationDirectory = 1,
+          NSDemoApplicationDirectory,
+          NSDeveloperApplicationDirectory,
+          NSAdminApplicationDirectory,
+          NSLibraryDirectory,
+          NSDeveloperDirectory,
+          NSUserDirectory,
+          NSDocumentationDirectory,
+          NSDocumentDirectory,
+          NSCoreServiceDirectory,
+          NSAutosavedInformationDirectory,
+          NSDesktopDirectory,
+          NSCachesDirectory,
+          NSApplicationSupportDirectory,
+      }
+  
+      const NSUserDomainMask = 1
+  
+      const getNSFileManager = () => {
+          const NSFM = ObjC.classes.NSFileManager
+          return NSFM.defaultManager()
+      }
+  
+      // small helper function to lookup ios bundle paths
+      const getPathForNSLocation = (NSPath: NSSearchPaths): string => {
+          const p = getNSFileManager().URLsForDirectory_inDomains_(NSPath, NSUserDomainMask).lastObject()
+  
+          if (p) {
+              return p.path().toString()
+          }
+  
+          return ""
+      }
+  
+      let documentDirectory: string
+  
+      const hookJS = () => {
+  
+          try {
+  
+              const beforePath = `${documentDirectory}/hermes-before-hook.js`
+  
+              const afterPath = `${documentDirectory}/hermes-hook.js`
+  
+              // Write the script files to the device filesystem where the app can access it
+              const beforeFile = new File(beforePath, 'w')
+  
+              beforeFile.write(_before)
+  
+              beforeFile.close()
+  
+              const afterFile = new File(afterPath, 'w')
+  
+              afterFile.write(_main)
+  
+              afterFile.close()
+  
+              const objClasses = ObjC["classes"]
+  
+              const nsUrlClass = objClasses["NSURL"]
+  
+              const beforeScriptUrl = nsUrlClass["+ URLWithString:"](`file://${beforePath}`)
+  
+              const afterScriptUrl = nsUrlClass["+ URLWithString:"](`file://${afterPath}`)
+  
+              const nsDataClass = objClasses["NSData"]
+  
+              const beforeScriptData = nsDataClass["+ dataWithContentsOfURL:"](beforeScriptUrl)
+  
+              const afterScriptData = nsDataClass["+ dataWithContentsOfURL:"](afterScriptUrl)
+  
+              const reactBridgeClass = objClasses["RCTCxxBridge"]
+  
+              const executeApplicationScriptMethod = reactBridgeClass["- executeApplicationScript:url:async:"]
+  
+              const originalExecuteApplicationScript = executeApplicationScriptMethod.implementation
+  
+              executeApplicationScriptMethod.implementation = ObjC.implement(
+  
+                  executeApplicationScriptMethod,
+                  (handle, selector, scriptData, scriptUrl, asyncFlag) => {
+  
+                      // Load up the script that will be executed before the RN bundle is loaded and executes
+                      originalExecuteApplicationScript(
+                          handle,
+                          selector,
+                          beforeScriptData,
+                          beforeScriptUrl,
+                          asyncFlag,
+                      )
+  
+                      // Load the actual RN bundle
+                      const originalBundleLoadResult = originalExecuteApplicationScript(
+                          handle,
+                          selector,
+                          scriptData,
+                          scriptUrl,
+                          asyncFlag,
+                      )
+  
+                      // Load up the script that will be executed after the RN bundle is loaded and starts executing
+                      originalExecuteApplicationScript(
+                          handle,
+                          selector,
+                          afterScriptData,
+                          afterScriptUrl,
+                          asyncFlag,
+                      )
+  
+                      console.log('[*] hermes_hook was loaded!')
+  
+                      send({ type: 'hermes_hook_loaded' })
+  
+                      return originalBundleLoadResult
+                  }
+              )
+  
+          } catch (e) {
+  
+              console.error(e)
+          }
+      }
+  
+      const waitForAppDocuments = () => {
+  
+          const interval = setInterval(() => {
+  
+              try {
+  
+                  documentDirectory = getPathForNSLocation(NSSearchPaths.NSDocumentDirectory)
+  
+                  hookJS()
+  
+                  clearInterval(interval)
+  
+              } catch (e) {
+                  // App not yet available, keep waiting
+              }
+          }, 10)
+      }
+  
+      waitForAppDocuments()
     }
   }
 };
