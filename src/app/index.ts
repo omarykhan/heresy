@@ -12,10 +12,68 @@ const run = async () => {
   const appScripts = readScripts(conf);
 
 
-  const device = await frida.getUsbDevice();
+  let device = null
+
+  if (conf.frida_device) {
+
+    try {
+
+      device = await frida.getDevice(conf.frida_device)
+
+    } catch (e) {
+
+      const deviceManager = frida.getDeviceManager()
+
+      device = await deviceManager.addRemoteDevice(conf.frida_device)
+
+    }
+
+  } else {
+
+    device = await frida.getUsbDevice()
+
+  }
+
   const pid = await device.spawn([conf.package_name]);
   const session = await device.attach(pid);
 
+  const deviceSysParams = await device.querySystemParameters()
+
+  const osId = deviceSysParams["os"]["id"]
+
+  // Frida might conflict with some other essential injectors on iOS (https://github.com/frida/frida/issues/1696#issuecomment-1986584958). Explicit loading helps to resolve this
+  if ("ios" === osId) {
+
+    const conflictingInjectorLoadSource = `
+
+      const conflictingLibs = [
+
+        // The newest one
+        "/usr/lib/ellekit/libinjector.dylib",
+
+        // The obsolete one
+        "/usr/lib/libsubstitute.dylib",
+
+        // The oldest one
+        "/usr/lib/substrate/SubstrateBootstrap.dylib",
+
+      ]
+
+      for (const conflictingLib of conflictingLibs) {
+
+        Module.load(conflictingLib)
+
+      }
+    
+    `
+
+    const conflictingInjectorLoadBytecode = await session.compileScript(conflictingInjectorLoadSource)
+
+    const conflictingInjectorLoadScript = await session.createScriptFromBytes(conflictingInjectorLoadBytecode)
+
+    await conflictingInjectorLoadScript.load()
+
+  }
 
   const script = await session.createScript(appScripts.frida_agent);
 

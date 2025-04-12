@@ -4,6 +4,7 @@ import { HeresyConfig } from "src/hermes_agent/heresy";
 
 export interface HeresyAppConfig  {
   package_name: string;
+  frida_device?: string;
   hermes_before?: string;
   hermes_hook: string;
   rpc_port: number;
