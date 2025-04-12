@@ -5,3 +5,4 @@ dist
 .heresy
 !.heresy.example
 Caddyfile
+tls

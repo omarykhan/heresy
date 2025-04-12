@@ -1,5 +1,7 @@
 import { createInterface, Interface } from 'readline';
 import { WebSocket, WebSocketServer } from 'ws';
+import * as fs from 'fs';
+import * as https from 'https';
 
 export class HermesRPCServer {
   server: WebSocketServer;
@@ -10,7 +12,21 @@ export class HermesRPCServer {
       this.rl = rl;
     }
     
-    this.server = new WebSocket.Server({ port });
+    try {
+
+      const httpsServer = https.createServer({
+        cert: fs.readFileSync("tls/mobile_hermes_wss.crt"),
+        key: fs.readFileSync("tls/mobile_hermes_wss.key"),
+      }).listen(port)
+
+      this.server = new WebSocket.Server({ server: httpsServer })
+      
+    } catch (e) {
+
+      this.server = new WebSocket.Server({ port });
+
+    }
+
     this.server.on('connection', this._onConnection.bind(this));
     this.server.on('error', this._onError.bind(this));
   }
